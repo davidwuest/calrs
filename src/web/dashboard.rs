@@ -257,6 +257,29 @@ pub(super) async fn dashboard_event_types(
             .unwrap_or_default()
     };
 
+    // Bookable date range badge per event type: the range, and whether it is
+    // still ahead, running, or over.
+    let ranged_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM event_types WHERE bookable_from IS NOT NULL OR bookable_until IS NOT NULL",
+    )
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+    let listed: std::collections::HashSet<&String> = event_types
+        .iter()
+        .map(|row| &row.0)
+        .chain(team_event_types.iter().map(|row| &row.0))
+        .collect();
+    let mut date_range_map: HashMap<String, (String, &'static str)> = HashMap::new();
+    for etid in ranged_ids.iter().filter(|id| listed.contains(id)) {
+        let window = get_booking_window(&state.pool, etid).await;
+        let today = today_in(get_host_tz(&state.pool, etid).await);
+        if let Some(badge) = date_range_badge(&window, today, auth_user.lang) {
+            date_range_map.insert(etid.clone(), badge);
+        }
+    }
+    let date_range_for = |etid: &str| date_range_map.get(etid).cloned().unwrap_or_default();
+
     // Build a single unified list: personal event types first, then team ones
     let mut all_et_ctx: Vec<minijinja::Value> = Vec::new();
 
@@ -272,6 +295,8 @@ pub(super) async fn dashboard_event_types(
             overrides_url => format!("/dashboard/event-types/{}/overrides", slug),
             embed_url => format!("/dashboard/event-types/{}/embed", slug),
             resource_names => resource_names_for(id),
+            date_range => date_range_for(id).0,
+            date_range_state => date_range_for(id).1,
             view_url => if vis != "private" { user.username.as_ref().map(|u| format!("/u/{}/{}", u, slug)) } else { None::<String> },
         });
     }
@@ -302,6 +327,8 @@ pub(super) async fn dashboard_event_types(
             embed_url => format!("/dashboard/group-event-types/{}/{}/embed", team_id, slug),
             overrides_url => format!("/dashboard/event-types/{}/overrides", slug),
             resource_names => resource_names_for(id),
+            date_range => date_range_for(id).0,
+            date_range_state => date_range_for(id).1,
             // Team event types always get a view link — logged-in team members
             // can view private/internal slots without an invite token.
             view_url => Some(format!("/team/{}/{}", team_slug, slug)),
