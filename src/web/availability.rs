@@ -1890,7 +1890,7 @@ async fn get_user_tz(pool: &SqlitePool, user_id: &str) -> Tz {
 }
 
 /// Deterministic default for missing timezone configuration.
-fn server_tz() -> Tz {
+pub(super) fn server_tz() -> Tz {
     Tz::UTC
 }
 

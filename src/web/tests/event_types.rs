@@ -2042,3 +2042,53 @@ async fn team_event_type_create_and_edit_refuse_invalid_input() {
     assert!(response.status().is_redirection());
     assert_eq!(event_type_count(&pool).await, before + 1);
 }
+
+#[tokio::test]
+async fn dashboard_list_badges_each_event_type_with_a_range() {
+    let (app, pool, session, et_id) = setup_test_app().await;
+    let today = Utc::now().date_naive();
+
+    // The seeded event type is running, a second one is already over, and a
+    // third has no range, so the single badge query must tell all three apart.
+    set_range(
+        &pool,
+        &et_id,
+        Some(today - Duration::days(1)),
+        Some(today + Duration::days(5)),
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO event_types (id, account_id, slug, title, duration_min, bookable_until)
+         SELECT 'et-over', account_id, 'over', 'Over fair', 30, ? FROM event_types WHERE id = ?",
+    )
+    .bind(ymd(today - Duration::days(3)))
+    .bind(&et_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO event_types (id, account_id, slug, title, duration_min)
+         SELECT 'et-plain', account_id, 'plain-one', 'Plain one', 30 FROM event_types WHERE id = ?",
+    )
+    .bind(&et_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let response = app
+        .oneshot(get_authed("/dashboard/event-types", &session))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let body = body_string(response).await;
+    assert_eq!(
+        body.matches("badge badge-success").count(),
+        1,
+        "only the running range is badged as active"
+    );
+    assert_eq!(
+        body.matches("badge badge-disabled").count(),
+        2,
+        "the expired range shows its label and the expired badge, the plain one nothing"
+    );
+}

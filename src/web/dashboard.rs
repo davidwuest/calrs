@@ -258,24 +258,51 @@ pub(super) async fn dashboard_event_types(
     };
 
     // Bookable date range badge per event type: the range, and whether it is
-    // still ahead, running, or over.
-    let ranged_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT id FROM event_types WHERE bookable_from IS NOT NULL OR bookable_until IS NOT NULL",
-    )
-    .fetch_all(&state.pool)
-    .await
-    .unwrap_or_default();
-    let listed: std::collections::HashSet<&String> = event_types
+    // still ahead, running, or over. One query for the listed event types,
+    // with the same timezone fallback as `get_host_tz`.
+    let listed_ids: Vec<&String> = event_types
         .iter()
         .map(|row| &row.0)
         .chain(team_event_types.iter().map(|row| &row.0))
         .collect();
     let mut date_range_map: HashMap<String, (String, &'static str)> = HashMap::new();
-    for etid in ranged_ids.iter().filter(|id| listed.contains(id)) {
-        let window = get_booking_window(&state.pool, etid).await;
-        let today = today_in(get_host_tz(&state.pool, etid).await);
-        if let Some(badge) = date_range_badge(&window, today, auth_user.lang) {
-            date_range_map.insert(etid.clone(), badge);
+    if !listed_ids.is_empty() {
+        let placeholders = vec!["?"; listed_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT et.id, et.booking_horizon_days, et.bookable_from, et.bookable_until,
+                    COALESCE(NULLIF(et.timezone, ''), u.timezone)
+             FROM event_types et
+             LEFT JOIN accounts a ON a.id = et.account_id
+             LEFT JOIN users u ON u.id = a.user_id
+             WHERE (et.bookable_from IS NOT NULL OR et.bookable_until IS NOT NULL)
+               AND et.id IN ({placeholders})"
+        );
+        let mut query = sqlx::query_as::<
+            _,
+            (
+                String,
+                Option<i32>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ),
+        >(&sql);
+        for id in &listed_ids {
+            query = query.bind(*id);
+        }
+        let ranged = query.fetch_all(&state.pool).await.unwrap_or_default();
+        for (etid, horizon_days, from, until, tz) in ranged {
+            let window = BookingWindow {
+                horizon_days,
+                bookable_from: parse_optional_date(from.as_deref()),
+                bookable_until: parse_optional_date(until.as_deref()),
+            };
+            let tz = tz
+                .and_then(|name| name.parse::<Tz>().ok())
+                .unwrap_or_else(server_tz);
+            if let Some(badge) = date_range_badge(&window, today_in(tz), auth_user.lang) {
+                date_range_map.insert(etid, badge);
+            }
         }
     }
     let date_range_for = |etid: &str| date_range_map.get(etid).cloned().unwrap_or_default();
