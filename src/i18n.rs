@@ -218,6 +218,11 @@ pub fn format_date(date: NaiveDate, lang: &str) -> String {
     args.set("month", FluentValue::from(month.as_str()));
     args.set("day", FluentValue::from(day.as_str()));
     args.set("year", FluentValue::from(year.as_str()));
+    // Polish inflects the month once a day precedes it ("10 listopada"), so
+    // the pattern can select on the month number instead of the nominative.
+    // Default number options on purpose: Fluent compares a selector with a
+    // numeric key including the options, and `number()` turns grouping off.
+    args.set("monthNumber", FluentValue::from(date.month() as i64));
     translate(lang, "common-format-date", Some(&args))
 }
 
@@ -439,6 +444,7 @@ mod tests {
         assert_eq!(format_date(d, "de"), "10. November 2026");
         assert_eq!(format_date(d, "fr"), "10 novembre 2026");
         assert_eq!(format_date(d, "pt"), "10 de novembro de 2026");
+        assert_eq!(format_date(d, "pl"), "10 listopada 2026");
     }
 
     #[test]

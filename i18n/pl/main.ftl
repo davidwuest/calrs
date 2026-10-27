@@ -249,7 +249,21 @@ common-weekday-long-sun = niedziela
 #   ES: abril 2026  /  martes, 12 de marzo de 2026
 common-format-month-year = { $month } { $year }
 common-format-long-date = { $weekday }, { $day } { $month } { $year }
-common-format-date = { $day } { $month } { $year }
+common-format-date =
+    { $day } { $monthNumber ->
+    [1] stycznia
+    [2] lutego
+    [3] marca
+    [4] kwietnia
+    [5] maja
+    [6] czerwca
+    [7] lipca
+    [8] sierpnia
+    [9] września
+    [10] października
+    [11] listopada
+    *[12] grudnia
+    } { $year }
 
 # Email signatures and shared bits (src/email.rs)
 

@@ -97,8 +97,14 @@ pub fn horizon_last_date(now_host: NaiveDateTime, horizon: Option<i32>) -> Optio
 /// event type's, so a Tokyo fair's first morning can fall on the previous
 /// day for a guest in America.
 pub fn day_start_in(day: NaiveDate, from: Tz, to: Tz) -> NaiveDate {
-    from.from_local_datetime(&day.and_time(NaiveTime::MIN))
-        .earliest()
+    // A zone that jumps forward at midnight has no 00:00 that day, so take the
+    // first instant that does exist rather than the host date unconverted.
+    (0..48)
+        .filter_map(|half_hours| {
+            let t = NaiveTime::MIN + Duration::minutes(30 * half_hours);
+            from.from_local_datetime(&day.and_time(t)).earliest()
+        })
+        .next()
         .map_or(day, |t| t.with_timezone(&to).date_naive())
 }
 
@@ -124,6 +130,20 @@ mod tests {
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn day_start_skips_a_midnight_that_does_not_exist() {
+        // Havana springs forward at 00:00 on 2026-03-08, so that day starts
+        // at 01:00 local, which is still the 8th in Havana but already the
+        // 8th in UTC (06:00Z). Before the fix the fallback returned the host
+        // date unconverted, which is wrong for a guest west of the host.
+        let havana: Tz = "America/Havana".parse().unwrap();
+        let honolulu: Tz = "Pacific/Honolulu".parse().unwrap();
+        assert_eq!(
+            day_start_in(d("2026-03-08"), havana, honolulu),
+            d("2026-03-07")
+        );
     }
 
     fn range(from: Option<&str>, until: Option<&str>) -> BookingWindow {

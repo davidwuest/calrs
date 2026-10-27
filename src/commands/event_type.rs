@@ -362,6 +362,13 @@ pub async fn run(pool: &SqlitePool, cmd: EventTypeCommands) -> Result<()> {
             // Show the same window the booking page offers: start at the
             // first bookable day, stop at the horizon or the end of the range.
             let offsets = slot_day_offsets(days, now.date(), &window);
+            if offsets.is_empty() {
+                // Nothing is bookable (an expired range, say): skip the busy
+                // and resource lookups, which would otherwise run up to a
+                // distant `bookable_from`.
+                println!("Available slots for {} ({}min):\n", slug.bold(), duration);
+                return Ok(());
+            }
             let days = offsets.end;
             let min_start = Utc::now() + Duration::minutes(min_notice as i64);
             let end_date = now.date() + Duration::days(days as i64);
